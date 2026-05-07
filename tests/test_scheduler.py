@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from flusso import store
 from flusso.config import load_config
 from flusso.gpu_probe import GPUInfo, GPUProbeResult
-from flusso.models import RUNNING
+from flusso.models import FAILED, RUNNING, SKIPPED, SUCCEEDED
 from flusso.scheduler import Scheduler
 
 
@@ -72,3 +72,62 @@ def test_scheduler_launches_fifo_with_lowest_idle_gpus(monkeypatch, tmp_path):
     assert launched == [(1, [0, 2]), (2, [3])]
     assert store.get_job(conn, 1).status == RUNNING
     assert store.get_job(conn, 1).assigned_gpus == "0,2"
+
+
+def test_scheduler_waits_for_dependencies_to_succeed(monkeypatch, tmp_path):
+    scheduler, conn = make_scheduler(tmp_path)
+    parent = store.create_job(conn, command="parent", gpu_required=1, working_directory=str(tmp_path))
+    child = store.create_job(
+        conn,
+        command="child",
+        gpu_required=1,
+        working_directory=str(tmp_path),
+        depends_on=[parent.id],
+    )
+    launched = []
+
+    monkeypatch.setattr(
+        "flusso.scheduler.query_gpus",
+        lambda: GPUProbeResult([GPUInfo(0, "GPU-0", 0, 0), GPUInfo(1, "GPU-1", 0, 0)]),
+    )
+
+    def fake_start_job(job, assigned, logs_dir):
+        launched.append(job.id)
+        return FakeStarted(
+            pid=1000 + job.id,
+            process_group_id=1000 + job.id,
+            log_path=logs_dir / f"job-{job.id}.log",
+            popen=FakeProcess(),
+        )
+
+    monkeypatch.setattr("flusso.runner.start_job", fake_start_job)
+
+    assert scheduler.run_once() == [parent.id]
+    assert launched == [parent.id]
+    assert store.get_job(conn, child.id).status != RUNNING
+
+    scheduler.processes.clear()
+    store.mark_finished(conn, parent.id, status=SUCCEEDED, exit_code=0)
+
+    assert scheduler.run_once() == [child.id]
+
+
+def test_scheduler_skips_jobs_when_dependency_failed(monkeypatch, tmp_path):
+    scheduler, conn = make_scheduler(tmp_path)
+    parent = store.create_job(conn, command="parent", gpu_required=1, working_directory=str(tmp_path))
+    child = store.create_job(
+        conn,
+        command="child",
+        gpu_required=1,
+        working_directory=str(tmp_path),
+        depends_on=[parent.id],
+    )
+    store.mark_finished(conn, parent.id, status=FAILED, exit_code=1)
+
+    monkeypatch.setattr(
+        "flusso.scheduler.query_gpus",
+        lambda: GPUProbeResult([GPUInfo(0, "GPU-0", 0, 0)]),
+    )
+
+    assert scheduler.run_once() == []
+    assert store.get_job(conn, child.id).status == SKIPPED

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from .models import CANCELLED, HELD, Job, PENDING, RUNNING, format_gpu_list
+from .models import CANCELLED, FAILED, HELD, Job, PENDING, RUNNING, SKIPPED, format_gpu_list
 
 
 SCHEMA = """
@@ -79,16 +79,34 @@ def create_job(
     working_directory: str,
     name: str | None = None,
     status: str = PENDING,
+    depends_on: list[int] | None = None,
 ) -> Job:
-    cursor = conn.execute(
-        """
-        INSERT INTO jobs (name, command, gpu_required, status, working_directory)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (name, command, gpu_required, status, working_directory),
-    )
-    conn.commit()
-    return get_job(conn, cursor.lastrowid)
+    dependencies = depends_on or []
+    with conn:
+        for dependency_id in dependencies:
+            if not job_exists(conn, dependency_id):
+                raise ValueError(f"dependency job {dependency_id} does not exist")
+        cursor = conn.execute(
+            """
+            INSERT INTO jobs (name, command, gpu_required, status, working_directory)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (name, command, gpu_required, status, working_directory),
+        )
+        job_id = cursor.lastrowid
+        conn.executemany(
+            """
+            INSERT INTO dependencies (job_id, depends_on_job_id)
+            VALUES (?, ?)
+            """,
+            [(job_id, dependency_id) for dependency_id in dependencies],
+        )
+    return get_job(conn, job_id)
+
+
+def job_exists(conn: sqlite3.Connection, job_id: int) -> bool:
+    row = conn.execute("SELECT 1 FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    return row is not None
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> Job:
@@ -106,14 +124,63 @@ def list_jobs(conn: sqlite3.Connection) -> list[Job]:
 def pending_jobs_fifo(conn: sqlite3.Connection) -> list[Job]:
     rows = conn.execute(
         """
-        SELECT *
+        SELECT jobs.*
         FROM jobs
-        WHERE status = ?
-        ORDER BY created_at ASC, id ASC
+        WHERE jobs.status = ?
+          AND NOT EXISTS (
+              SELECT 1
+              FROM dependencies
+              JOIN jobs AS upstream ON upstream.id = dependencies.depends_on_job_id
+              WHERE dependencies.job_id = jobs.id
+                AND upstream.status != 'SUCCEEDED'
+          )
+        ORDER BY jobs.created_at ASC, jobs.id ASC
         """,
         (PENDING,),
     ).fetchall()
     return [_row_to_job(row) for row in rows]
+
+
+def skip_jobs_with_failed_dependencies(conn: sqlite3.Connection) -> list[Job]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT jobs.id
+        FROM jobs
+        JOIN dependencies ON dependencies.job_id = jobs.id
+        JOIN jobs AS upstream ON upstream.id = dependencies.depends_on_job_id
+        WHERE jobs.status = ?
+          AND upstream.status IN (?, ?, ?)
+        ORDER BY jobs.id ASC
+        """,
+        (PENDING, FAILED, CANCELLED, SKIPPED),
+    ).fetchall()
+    skipped: list[Job] = []
+    with conn:
+        for row in rows:
+            conn.execute(
+                """
+                UPDATE jobs
+                SET status = ?,
+                    ended_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (SKIPPED, row["id"]),
+            )
+            skipped.append(get_job(conn, row["id"]))
+    return skipped
+
+
+def job_dependencies(conn: sqlite3.Connection, job_id: int) -> list[int]:
+    rows = conn.execute(
+        """
+        SELECT depends_on_job_id
+        FROM dependencies
+        WHERE job_id = ?
+        ORDER BY depends_on_job_id ASC
+        """,
+        (job_id,),
+    ).fetchall()
+    return [row["depends_on_job_id"] for row in rows]
 
 
 def running_jobs(conn: sqlite3.Connection) -> list[Job]:

@@ -50,6 +50,11 @@ def submit(
     gpus: int = typer.Option(..., "--gpus", min=0, help="Number of GPUs required."),
     name: Optional[str] = typer.Option(None, "--name", help="Job name."),
     cwd: Path = typer.Option(Path.cwd(), "--cwd", help="Working directory."),
+    after: list[int] = typer.Option(
+        [],
+        "--after",
+        help="Job ID that must succeed before this job can run. Repeat for multiple dependencies.",
+    ),
 ) -> None:
     """Submit a shell command as a pending job."""
     command = " ".join(ctx.args)
@@ -57,13 +62,18 @@ def submit(
         raise typer.BadParameter("COMMAND is required after --")
     config = _config()
     with store.connect(config.db_path) as conn:
-        job = store.create_job(
-            conn,
-            command=command,
-            gpu_required=gpus,
-            working_directory=str(cwd.expanduser().resolve()),
-            name=name,
-        )
+        try:
+            job = store.create_job(
+                conn,
+                command=command,
+                gpu_required=gpus,
+                working_directory=str(cwd.expanduser().resolve()),
+                name=name,
+                depends_on=after,
+            )
+        except ValueError as exc:
+            console.print(str(exc))
+            raise typer.Exit(1) from None
     console.print(f"Submitted job {job.id}")
 
 
@@ -73,6 +83,7 @@ def list_queue() -> None:
     config = _config()
     with store.connect(config.db_path) as conn:
         jobs = store.list_jobs(conn)
+        dependencies = {job.id: store.job_dependencies(conn, job.id) for job in jobs}
 
     table = Table()
     table.add_column("ID", justify="right")
@@ -80,6 +91,7 @@ def list_queue() -> None:
     table.add_column("STATUS")
     table.add_column("GPUS", justify="right")
     table.add_column("ASSIGNED")
+    table.add_column("DEPENDS")
     table.add_column("CREATED (LOCAL)")
     for job in jobs:
         table.add_row(
@@ -88,6 +100,7 @@ def list_queue() -> None:
             job.status,
             str(job.gpu_required),
             job.assigned_gpus or "-",
+            ",".join(str(job_id) for job_id in dependencies[job.id]) or "-",
             format_local_timestamp(job.created_at),
         )
     console.print(table)

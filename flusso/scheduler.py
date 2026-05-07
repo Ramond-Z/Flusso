@@ -34,6 +34,7 @@ class Scheduler:
 
     def run_once(self) -> list[int]:
         self.refresh_running_jobs()
+        store.skip_jobs_with_failed_dependencies(self.conn)
         probe = query_gpus()
         free_gpus = idle_gpu_indices(
             probe,

@@ -457,11 +457,14 @@ flusso submit --gpus 2 --name exp001-train -- python train.py --config configs/e
 
 ```bash
 --cwd PATH
+--after JOB_ID
 --env KEY=VALUE
 --priority N
 --hold
 --pool 0,1,2,3
 ```
+
+MVP 已支持重复传入 `--after JOB_ID` 形成简单顺序依赖。依赖不存在时提交失败；依赖存在时，任务只有在所有上游任务成功后才会被调度。如果上游进入 `FAILED`、`CANCELLED` 或 `SKIPPED`，下游 pending 任务会被标记为 `SKIPPED`。
 
 ### 9.4 提交任务组
 
@@ -682,6 +685,7 @@ CREATE TABLE groups (
 * `flusso init`
 * `flusso daemon run`
 * `flusso submit --gpus N -- command`
+* `flusso submit --after JOB_ID` 简单顺序依赖
 * `flusso ls`
 * `flusso logs`
 * `flusso cancel` pending / held 任务
@@ -696,8 +700,8 @@ CREATE TABLE groups (
 功能：
 
 * `flusso submit-group pipeline.yaml`
-* `needs` 依赖；
-* 上游失败时下游 `SKIPPED`；
+* YAML `needs` 依赖；
+* YAML 任务组中的级联 `SKIPPED`；
 * `flusso retry --cascade`。
 
 ### Phase 3: 任务控制与鲁棒性
