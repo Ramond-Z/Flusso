@@ -8,19 +8,20 @@ from flusso.cli import app, format_local_timestamp
 runner = CliRunner()
 
 
-def test_delete_pending_job_from_cli(monkeypatch, tmp_path):
+def test_cancel_pending_job_from_cli_keeps_job_in_ls(monkeypatch, tmp_path):
     monkeypatch.setenv("FLUSSO_HOME", str(tmp_path / "state"))
 
-    submit = runner.invoke(app, ["submit", "--gpus", "0", "--name", "delete-me", "--", "echo", "ok"])
+    submit = runner.invoke(app, ["submit", "--gpus", "0", "--name", "cancel-me", "--", "echo", "ok"])
     assert submit.exit_code == 0
 
-    deleted = runner.invoke(app, ["delete", "1"])
-    assert deleted.exit_code == 0
-    assert "Deleted job 1" in deleted.output
+    cancelled = runner.invoke(app, ["cancel", "1"])
+    assert cancelled.exit_code == 0
+    assert "Cancelled job 1" in cancelled.output
 
     listed = runner.invoke(app, ["ls"])
     assert listed.exit_code == 0
-    assert "delete-me" not in listed.output
+    assert "cancel-me" in listed.output
+    assert "CANCELLED" in listed.output
 
 
 def test_format_local_timestamp_converts_sqlite_utc_timestamp():

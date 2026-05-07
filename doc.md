@@ -684,6 +684,7 @@ CREATE TABLE groups (
 * `flusso submit --gpus N -- command`
 * `flusso ls`
 * `flusso logs`
+* `flusso cancel` pending / held 任务
 * SQLite 存储
 * 基于 `nvidia-smi` 的 GPU 空闲检测
 * `CUDA_VISIBLE_DEVICES` 注入
@@ -705,7 +706,7 @@ CREATE TABLE groups (
 
 功能：
 
-* `flusso cancel`
+* `flusso cancel` running 任务
 * 进程组管理；
 * daemon crash 后恢复 running jobs 状态；
 * 更清晰的错误状态；

@@ -94,19 +94,19 @@ def list_queue() -> None:
 
 
 @app.command()
-def delete(job_id: int) -> None:
-    """Delete a job that has not been scheduled yet."""
+def cancel(job_id: int) -> None:
+    """Cancel a job that has not been scheduled yet."""
     config = _config()
     with store.connect(config.db_path) as conn:
         try:
-            job = store.delete_unscheduled_job(conn, job_id)
+            job = store.cancel_unscheduled_job(conn, job_id)
         except KeyError:
             console.print(f"Job {job_id} does not exist")
             raise typer.Exit(1) from None
         except ValueError as exc:
             console.print(str(exc))
             raise typer.Exit(1) from None
-    console.print(f"Deleted job {job.id}")
+    console.print(f"Cancelled job {job.id}")
 
 
 @app.command()

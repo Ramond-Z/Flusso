@@ -1,7 +1,7 @@
 from flusso import store
 import pytest
 
-from flusso.models import HELD, PENDING, RUNNING
+from flusso.models import CANCELLED, HELD, PENDING, RUNNING
 
 
 def test_init_db_and_create_job(tmp_path):
@@ -48,7 +48,7 @@ def test_fifo_pending_jobs_and_running_transition(tmp_path):
         assert [job.id for job in store.pending_jobs_fifo(conn)] == [second.id]
 
 
-def test_delete_unscheduled_job_allows_pending_and_held(tmp_path):
+def test_cancel_unscheduled_job_allows_pending_and_held(tmp_path):
     db_path = tmp_path / "flusso.db"
     store.init_db(db_path)
 
@@ -62,12 +62,16 @@ def test_delete_unscheduled_job_allows_pending_and_held(tmp_path):
             status=HELD,
         )
 
-        assert store.delete_unscheduled_job(conn, pending.id).id == pending.id
-        assert store.delete_unscheduled_job(conn, held.id).id == held.id
-        assert store.list_jobs(conn) == []
+        cancelled_pending = store.cancel_unscheduled_job(conn, pending.id)
+        cancelled_held = store.cancel_unscheduled_job(conn, held.id)
+
+        assert cancelled_pending.status == CANCELLED
+        assert cancelled_held.status == CANCELLED
+        assert [job.status for job in store.list_jobs(conn)] == [CANCELLED, CANCELLED]
+        assert store.pending_jobs_fifo(conn) == []
 
 
-def test_delete_unscheduled_job_rejects_running_job(tmp_path):
+def test_cancel_unscheduled_job_rejects_running_job(tmp_path):
     db_path = tmp_path / "flusso.db"
     store.init_db(db_path)
 
@@ -83,6 +87,6 @@ def test_delete_unscheduled_job_rejects_running_job(tmp_path):
         )
 
         with pytest.raises(ValueError, match="RUNNING"):
-            store.delete_unscheduled_job(conn, job.id)
+            store.cancel_unscheduled_job(conn, job.id)
 
         assert store.get_job(conn, job.id).status == RUNNING
