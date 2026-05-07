@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,17 @@ def _config():
     ensure_state(config)
     store.init_db(config.db_path)
     return config
+
+
+def format_local_timestamp(value: str | None, local_tz: tzinfo | None = None) -> str:
+    if not value:
+        return "-"
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return value
+    target_tz = local_tz or datetime.now().astimezone().tzinfo
+    return parsed.astimezone(target_tz).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 @app.command()
@@ -68,7 +80,7 @@ def list_queue() -> None:
     table.add_column("STATUS")
     table.add_column("GPUS", justify="right")
     table.add_column("ASSIGNED")
-    table.add_column("CREATED")
+    table.add_column("CREATED (LOCAL)")
     for job in jobs:
         table.add_row(
             str(job.id),
@@ -76,7 +88,7 @@ def list_queue() -> None:
             job.status,
             str(job.gpu_required),
             job.assigned_gpus or "-",
-            job.created_at or "-",
+            format_local_timestamp(job.created_at),
         )
     console.print(table)
 

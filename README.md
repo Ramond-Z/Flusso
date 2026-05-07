@@ -79,6 +79,8 @@ uv run flusso daemon run
 uv run flusso ls
 ```
 
+队列中的时间以本地时区显示；内部 SQLite 时间戳使用 UTC 保存。
+
 删除尚未被调度的任务：
 
 ```bash
