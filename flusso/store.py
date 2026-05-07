@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from .models import Job, PENDING, RUNNING, format_gpu_list
+from .models import HELD, Job, PENDING, RUNNING, format_gpu_list
 
 
 SCHEMA = """
@@ -122,6 +122,15 @@ def running_jobs(conn: sqlite3.Connection) -> list[Job]:
         (RUNNING,),
     ).fetchall()
     return [_row_to_job(row) for row in rows]
+
+
+def delete_unscheduled_job(conn: sqlite3.Connection, job_id: int) -> Job:
+    job = get_job(conn, job_id)
+    if job.status not in {PENDING, HELD}:
+        raise ValueError(f"job {job_id} has status {job.status} and cannot be deleted")
+    conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    conn.commit()
+    return job
 
 
 def mark_running(
